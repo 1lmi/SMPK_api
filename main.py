@@ -86,3 +86,7 @@ async def read_schedule(day: str, group: str):
     print(f"Received request with parameters: day={day}, group={group}")
     return get_schedule_for_day(group, day)
 
+
+@app.get("/")
+async def read():
+    return {"message": "Hello World"}
