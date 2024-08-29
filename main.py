@@ -1,6 +1,6 @@
 import time
 import logging
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from datetime import datetime
 from isoweek import Week
 import openpyxl
@@ -22,10 +22,14 @@ groups = [
 ]
 
 
+loaded_schedules = {
+    "odd": None,
+    "even": None
+}
+
+
 def get_lesson_number(i):
-    """Возвращает номер пары на основе строки в расписании."""
-    lesson_numbers = ["1", "2", "3", "4", "5", "6"]
-    return lesson_numbers[i]
+    return str(i+1)
 
 
 def load_schedule_file(filename):
@@ -40,9 +44,23 @@ def load_schedule_file(filename):
         logger.error(f"Ошибка при загрузке файла {filename}: {e}")
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
+
+def initialize_schedules():
+    """Загружает расписания при запуске приложения."""
+    loaded_schedules["odd"] = load_schedule_file("rasp_cet.xlsx")
+    loaded_schedules["even"] = load_schedule_file("rasp_necet.xlsx")
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Функция инициализации, вызываемая при старте приложения."""
+    initialize_schedules()
+    print("Загрузка расписания выполнена успешно")
+
+
 def get_schedule_for_day(user_group: str, day: str):
     """Получает расписание на указанный день для заданной группы."""
-    start_time = time.time()
+    start_time = time.perf_counter()
     today = datetime.today()
     current_day = today.weekday()
     current_week = Week.withdate(today).week
@@ -52,12 +70,12 @@ def get_schedule_for_day(user_group: str, day: str):
 
     schedule_column = groups.index(user_group) + 3
 
-    schedule_filename = "rasp_cet.xlsx" if current_week % 2 == 0 else "rasp_necet.xlsx"
+    schedule_type = "even" if current_week % 2 == 0 else "odd"
 
     if current_day == 6:  # Если сегодня воскресенье
-        schedule_filename = "rasp_cet.xlsx" if current_week % 2 != 0 else "rasp_necet.xlsx"
+        schedule_type = "odd" if current_week % 2 != 0 else "even"
 
-    sheet_schedule = load_schedule_file(schedule_filename)
+    sheet_schedule = loaded_schedules[schedule_type]
 
     if day == "tomorrow":
         target_day = (current_day + 1) % 7  # Завтрашний день
@@ -75,18 +93,54 @@ def get_schedule_for_day(user_group: str, day: str):
         cleaned_lesson = " ".join(lesson.split()) if lesson else "Нет"
         schedule[get_lesson_number(i - start_row)] = cleaned_lesson
 
-    end_time = time.time()
-    logger.info(f"Время выполнения запроса для группы {user_group} на {day}: {end_time - start_time:.4f} секунд")
+    end_time = time.perf_counter()
+    logger.info(f"Время выполнения запроса для группы {user_group} на {day}: {end_time - start_time:.10f} секунд")
     return schedule
+
+
+def get_schedule_for_week(user_group: str, parity: str):
+    """Получает расписание на неделю для заданной группы, структурированное по дням недели."""
+    start_time = time.perf_counter()
+
+    if user_group not in groups:
+        raise HTTPException(status_code=404, detail="Group not found")
+
+    if parity not in ["odd", "even"]:
+        raise HTTPException(status_code=400, detail="Invalid parity specified")
+
+    sheet_schedule = loaded_schedules[parity]
+
+    schedule_column = groups.index(user_group) + 3
+
+    week_schedule = {
+        "pn": {},   # понедельник
+        "vt": {},   # вторник
+        "sr": {},   # среда
+        "cht": {},  # четверг
+        "pt": {},   # пятница
+        "sb": {}    # суббота
+    }
+
+    for day_index, day_name in enumerate(week_schedule.keys()):
+        start_row = 6 + (day_index * 6)
+        end_row = start_row + 5
+
+        for i in range(start_row, end_row + 1):
+            lesson = sheet_schedule.cell(row=i, column=schedule_column).value
+            cleaned_lesson = " ".join(lesson.split()) if lesson else "Нет"
+            week_schedule[day_name][get_lesson_number(i - start_row)] = cleaned_lesson
+
+    end_time = time.perf_counter()
+    logger.info(f"Время выполнения запроса для группы {user_group} на {parity}: {end_time - start_time:.10f} секунд")
+
+    return week_schedule
 
 
 @app.get("/schedule/")
 async def read_schedule(day: str, group: str):
-    # Выводим тело запроса в консоль
-    print(f"Received request with parameters: day={day}, group={group}")
     return get_schedule_for_day(group, day)
 
 
-@app.get("/")
-async def read():
-    return {"message": "Hello World"}
+@app.get("/schedule/for_week/")
+async def schedule_for_week(group: str, parity: str):
+    return get_schedule_for_week(group, parity)
