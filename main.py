@@ -4,12 +4,22 @@ from fastapi import FastAPI, HTTPException
 from datetime import datetime
 from isoweek import Week
 import openpyxl
+from fastapi.middleware.cors import CORSMiddleware  # Импортируем CORS
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Разрешить запросы с любых источников (лучше настроить конкретные источники)
+    allow_credentials=True,
+    allow_methods=["*"],  # Разрешить любые методы (GET, POST и т.д.)
+    allow_headers=["*"],  # Разрешить любые заголовки
+)
 
 groups = [
     'ТОР-23', 'РЭГ-23', 'СЭЗС-23', 'ПР-23', 'ОПИ-23', 'ДПИ-23', 'МД-23/1', 'МД-23/2',
